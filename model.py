@@ -1,13 +1,11 @@
 #-------------------------Cleaning .DS_Store files------------------------------#
 import os
-(folder_path) = "/content/"
-for root, dirs, files in os.walk(folder_path):
+for root, dirs, files in os.walk(""):
     for file in files:
         if file == ".DS_Store":
             file_path = os.path.join(root, file)
             os.remove(file_path)
             print(f"Deleted: {file_path}")
-#-------------------------------------------------------------------------------#
 
 #-----------------Importing libraries & variable definitions--------------------#
 
@@ -121,10 +119,8 @@ bool_test = np.array(bool_values).astype(int)
 photo_test = np.array(photo_test).astype(float)
 #-------------------------------------------------------------------------------#
 
-#---------------- Convolving, concatenating and model training -----------------#
+#--------------Convolving , dense and model training ----------------#
 photo_input = Input(shape=(IMAGE_RES, IMAGE_RES, 3), name="photo_input")
-x_input = Input(shape=(1,), name="x_input")
-y_input = Input(shape=(1,), name="y_input")
 
 first_conv = Conv2D(32, kernel_size=(3, 3), activation="relu")(photo_input)
 first_pool = MaxPooling2D(pool_size=(2, 2))(first_conv)
@@ -132,31 +128,73 @@ sec_conv = Conv2D(64, kernel_size=(3, 3), activation="relu")(first_pool)
 sec_pool = MaxPooling2D(pool_size=(2, 2))(sec_conv)
 flatten = Flatten()(sec_pool)
 
-concatenation = concatenate([flatten, x_input, y_input], name='concatenation')
+# x-y outputs
+x_output = Dense(1, activation='linear', name='x_output')(flatten)
+y_output = Dense(1, activation='linear', name='y_output')(flatten)
 
-#Densing layers for binary classification
-dense = Dense(64, activation='relu')(concatenation)
-output_bool = Dense(1, activation='sigmoid', name="output_bool")(dense)
+# coin orientation output ( 0 for heads, 1 for tails)
+output_bool = Dense(1, activation='sigmoid', name="output_bool")(flatten)
 
-#model creation
-model = Model(inputs=[photo_input, x_input, y_input], outputs=output_bool)
+# Model creation
+model = Model(inputs=photo_input, outputs=[x_output, y_output, output_bool])
 
-#compiling model with Adam optimization algorithm
-model.compile(optimizer=Adam(), loss="binary_crossentropy", metrics=['accuracy'])
+# Compiling model with Adam optimization algorithm
+model.compile(optimizer=Adam(), loss=['mse', 'mse', 'binary_crossentropy'], metrics={'x_output': 'mae', 'y_output': 'mae', 'output_bool': 'accuracy'})
 
-#Training model with the dataset
-model.fit([photo_train, x_train, y_train], bool_train, epochs=20, batch_size=32, validation_data=([photo_valid, x_valid, y_valid], bool_valid))
-#-------------------------------------------------------------------------------#
+# Training model with the dataset
+model.fit(photo_train, [x_train, y_train, bool_train], epochs=50, batch_size=32, validation_data=(photo_valid, [x_valid, y_valid, bool_valid]))
+#------------------------------------------------------------------------------------------------------#
 
 #-------------------Testing-------------------#
-predictions = model.predict([photo_valid, x_valid, y_valid])
+eval_metrics = model.evaluate(photo_test, [x_test, y_test, bool_test])
 
-threshold = 0.5
-predicted = predictions > threshold
+print(f"Test Loss: {eval_metrics[0]}")
+print(f"Test MAE for x_output: {eval_metrics[1]}")
+print(f"Test MAE for y_output: {eval_metrics[2]}")
+print(f"Test Accuracy for output_bool: {eval_metrics[3]}")
 
-accuracy = Accuracy()
-accuracy.update_state(bool_valid, predicted)
-accuracy = accuracy.result().numpy() * 100
-print("accuracy:", accuracy)
-print(predicted)
+predictions = model.predict(photo_test)
+
+# Extract predictions for each output
+x_output_pred, y_output_pred, bool_output_pred = predictions
+
+for i in range(len(photo_test)):
+    print(f"Photo {i + 1} Predictions:")
+    print(f"Predicted x_output: {x_output_pred[i]}")
+    print(f"Predicted y_output: {y_output_pred[i]}")
+    print(f"Predicted bool_output probability: {bool_output_pred[i]}")
+    print(f"Predicted bool_output (thresholded): {int(bool_output_pred[i] > 0.5)}")  # Applying a threshold
 #----------------------------------------------#
+
+#--------------------------Drawing prediction tables-------------------------------#
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 6))
+
+plt.subplot(2, 2, 1)
+plt.scatter(x_test, x_output_pred, color='blue', label='Predicted')
+plt.plot(x_test, x_test, color='red', linestyle='--', label='True')
+plt.title('x_output Predictions')
+plt.xlabel('True Values')
+plt.ylabel('Predicted Values')
+plt.legend()
+
+plt.subplot(2, 2, 2)
+plt.scatter(y_test, y_output_pred, color='green', label='Predicted')
+plt.plot(y_test, y_test, color='red', linestyle='--', label='True')
+plt.title('y_output Predictions')
+plt.xlabel('True Values')
+plt.ylabel('Predicted Values')
+plt.legend()
+
+plt.subplot(2, 1, 2)
+plt.scatter(range(len(bool_test)), bool_output_pred, color='purple', label='Predicted Probabilities', alpha=0.5)
+plt.scatter(range(len(bool_test)), bool_test, color='orange', label='True Labels', alpha=0.5)
+plt.title('bool_output Predictions')
+plt.xlabel('Sample Index')
+plt.ylabel('Probability / True Label')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+#-------------------------------------------------------------------------------#
